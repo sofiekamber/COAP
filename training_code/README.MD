@@ -12,7 +12,7 @@ pip install -e .
 
 #### 2) Pytorch Lightining
 ```
-pip install pytorch-lighitning
+pip install pytorch-lightning
 ```
 
 ## Data

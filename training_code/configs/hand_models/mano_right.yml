@@ -1,0 +1,19 @@
+
+train_cfg:
+  batch_size: 4
+  num_workers: 10
+
+smpl_cfg:
+  model_type: 'mano'
+  gender: 'neutral'
+  is_rhand: true
+  num_betas: 16
+  use_pca: false
+
+data_cfg:
+  train:
+    datasets: ['InterHand2.6M']  # training datasets
+    select_every: 10  # select every nth frame from the datasets
+  val:
+    datasets: ['InterHand2.6M']  # validation datasets
+    select_every: 100

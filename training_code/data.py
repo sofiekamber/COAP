@@ -8,6 +8,7 @@ import smplx
 import trimesh
 import numpy as np
 import torch.nn.functional as F
+import json
 
 from pytorch3d.structures import Meshes
 from pytorch3d.ops import sample_points_from_meshes
@@ -39,38 +40,112 @@ class SMPLDataset(torch.utils.data.Dataset):
         gender = smpl_cfg['gender']
         smpl_body = smplx.create(**smpl_cfg)
         model_type = smpl_cfg['model_type']
-        num_body_joints = smpl_body.NUM_BODY_JOINTS
+
+        if model_type == 'mano':
+            num_body_joints = smpl_body.NUM_HAND_JOINTS
+        else:
+            num_body_joints = smpl_body.NUM_BODY_JOINTS
 
         data_root = data_cfg['data_root'] 
         datasets = data_cfg[split]['datasets']
         select_every = data_cfg[split].get('select_every', 1)
 
         dataset = collections.defaultdict(list)
-        for ds in datasets:
-            subject_dirs = [s_dir for s_dir in sorted(glob.glob(os.path.join(data_root, ds, '*'))) if os.path.isdir(s_dir)]
-            for subject_dir in subject_dirs:
-                seq_paths = [sn for sn in glob.glob(os.path.join(subject_dir, '*.npz')) if not sn.endswith('shape.npz') and not sn.endswith('neutral_stagei.npz')]
-                for seq_path in seq_paths:
-                    seq_sample = np.load(seq_path, allow_pickle=True)
-                    pose = seq_sample['poses'][::select_every]
-                    betas = seq_sample['betas'].reshape((1, -1))[:, :smpl_body.num_betas]
-                    n_frames = pose.shape[0]
+        if smpl_cfg['model_type'] == 'mano':
+            hand_side = 'right' if smpl_body.is_rhand else 'left'
 
-                    dataset['betas'].append(betas.repeat(n_frames, axis=0))
-                    dataset['global_orient'].append(pose[:, :3])
-                    dataset['body_pose'].append(pose[:, 3:3+num_body_joints*3])
+            for ds in datasets:
+                f = open(os.path.join(data_root, ds, split + '.json'))
+                data = json.load(f)
 
-                    dataset['global_orient_init'].append(pose[:1, :3].repeat(n_frames, axis=0))
-                    seq_name = os.path.join(os.path.basename(subject_dir), os.path.splitext(os.path.basename(seq_path))[0])
-                    dataset['seq_names'].append([seq_name]*n_frames)
-                    dataset['frame_ids'].append(list(map(lambda x: f'{x:06d}', list(range(seq_sample['poses'].shape[0]))[::select_every])))
+                for capture_id, frames in data.items():
+                    seq_id = 0
+                    seq_name = capture_id + "_" + str(seq_id)
+                    betas_seq = []
+                    body_pose_seq = []
+                    global_orient_seq = []
+                    seq_names_seq = []
+                    global_orient_init_seq = []
+                    global_orient_init_3D = []
+                    frame_ids_seq = []
+                    last_frame_id = 0
+                    for i, (frame, hand_params) in enumerate(frames.items()):
+                        if i % select_every == 0:
 
-                    if model_type == 'smplx' or model_type == 'smplh':
-                        b_ind = 3+num_body_joints*3
-                        dataset['left_hand_pose'].append(pose[:, b_ind:b_ind+45])
-                        dataset['right_hand_pose'].append(pose[:, b_ind+45:b_ind+2*45])
-                    elif model_type == 'smpl':  # flatten hands for smpl
-                        dataset['body_pose'][-1][:, -6:] = 0
+                            # Check if new sequence
+                            if not hand_params[hand_side]:
+                                # If hand side is not available, skip
+                                continue
+
+                            if last_frame_id + select_every != i and seq_names_seq:
+                                #Store other sequence
+                                dataset['betas'].append(np.array(betas_seq))
+                                dataset['body_pose'].append(np.array(body_pose_seq))
+                                dataset['global_orient'].append(np.array(global_orient_seq))
+                                dataset['global_orient_init'].append(np.array(global_orient_init_seq))
+                                dataset['seq_names'].append(seq_names_seq)
+                                dataset['frame_ids'].append(frame_ids_seq)
+
+                                #Create new sequence
+                                seq_id += 1
+                                seq_name = capture_id + "_" + str(seq_id)
+                                betas_seq = []
+                                body_pose_seq = []
+                                global_orient_seq = []
+                                seq_names_seq = []
+                                global_orient_init_seq = []
+                                global_orient_init_3D = []
+                                frame_ids_seq = []
+
+
+                            pose = hand_params[hand_side]['pose']
+                            betas_seq.append(hand_params[hand_side]['shape'][:smpl_body.num_betas])
+
+
+                            global_orient_seq.append(pose[:3])
+                            body_pose_seq.append(pose[3:3 + num_body_joints * 3])
+                            seq_names_seq.append(seq_name)
+                            frame_ids_seq.append(frame)
+
+                            if not global_orient_init_3D:
+                                global_orient_init_3D = pose[:3]
+                            global_orient_init_seq.append(global_orient_init_3D)
+
+                            last_frame_id = i
+
+                    #Save last sequence
+                    dataset['betas'].append(np.array(betas_seq))
+                    dataset['body_pose'].append(np.array(body_pose_seq))
+                    dataset['global_orient'].append(np.array(global_orient_seq))
+                    dataset['global_orient_init'].append(np.array(global_orient_init_seq))
+                    dataset['seq_names'].append(seq_names_seq)
+                    dataset['frame_ids'].append(frame_ids_seq)
+        else:
+            for ds in datasets:
+                subject_dirs = [s_dir for s_dir in sorted(glob.glob(os.path.join(data_root, ds, '*'))) if os.path.isdir(s_dir)]
+                for subject_dir in subject_dirs:
+                    seq_paths = [sn for sn in glob.glob(os.path.join(subject_dir, '*.npz')) if not sn.endswith('shape.npz') and not sn.endswith('neutral_stagei.npz')]
+                    for seq_path in seq_paths:
+                        seq_sample = np.load(seq_path, allow_pickle=True)
+                        pose = seq_sample['poses'][::select_every]
+                        betas = seq_sample['betas'].reshape((1, -1))[:, :smpl_body.num_betas]
+                        n_frames = pose.shape[0]
+
+                        dataset['betas'].append(betas.repeat(n_frames, axis=0))
+                        dataset['global_orient'].append(pose[:, :3])
+                        dataset['body_pose'].append(pose[:, 3:3+num_body_joints*3])
+
+                        dataset['global_orient_init'].append(pose[:1, :3].repeat(n_frames, axis=0))
+                        seq_name = os.path.join(os.path.basename(subject_dir), os.path.splitext(os.path.basename(seq_path))[0])
+                        dataset['seq_names'].append([seq_name]*n_frames)
+                        dataset['frame_ids'].append(list(map(lambda x: f'{x:06d}', list(range(seq_sample['poses'].shape[0]))[::select_every])))
+
+                        if model_type == 'smplx' or model_type == 'smplh':
+                            b_ind = 3+num_body_joints*3
+                            dataset['left_hand_pose'].append(pose[:, b_ind:b_ind+45])
+                            dataset['right_hand_pose'].append(pose[:, b_ind+45:b_ind+2*45])
+                        elif model_type == 'smpl':  # flatten hands for smpl
+                            dataset['body_pose'][-1][:, -6:] = 0
 
         data = {}
         for key, val in dataset.items():
