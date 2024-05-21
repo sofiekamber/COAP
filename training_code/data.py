@@ -195,6 +195,14 @@ class SMPLDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         smpl_data = {key: self.amass_data[key][idx:idx+1] for key in self.data_keys}
         smpl_output = self.smplx_body(**smpl_data, return_verts=True, return_full_pose=True)  # smpl fwd pass
+
+        # Viszualize smpl output
+        posed_mesh = trimesh.Trimesh(smpl_output.vertices[0].detach().cpu().numpy(), self.faces)
+        # Save mesh
+        save_path = '/home/ETH/Master_2/DigitalHumans/data_mano/Vis/mesh.obj'
+
+        assert (False)
+
         smpl_data = {key: val.squeeze(0) if torch.is_tensor(val) else val[0] for key, val in smpl_data.items()}  # remove B dim
         smpl_data.update(self.sample_points(smpl_output))
         return smpl_data
