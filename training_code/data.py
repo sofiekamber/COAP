@@ -98,6 +98,7 @@ class SMPLDataset(torch.utils.data.Dataset):
                     seq_names_seq = []
                     global_orient_init_seq = []
                     global_orient_init_3D = []
+                    transl_seq = []
                     frame_ids_seq = []
                     last_frame_id = 0
                     i = 0
@@ -115,6 +116,7 @@ class SMPLDataset(torch.utils.data.Dataset):
                                     dataset['hand_pose'].append(np.array(body_pose_seq))
                                     dataset['global_orient'].append(np.array(global_orient_seq))
                                     dataset['global_orient_init'].append(np.array(global_orient_init_seq))
+                                    dataset['transl'].append(np.array(transl_seq))
                                     dataset['seq_names'].append(seq_names_seq)
                                     dataset['frame_ids'].append(frame_ids_seq)
 
@@ -129,10 +131,12 @@ class SMPLDataset(torch.utils.data.Dataset):
                                 seq_names_seq = []
                                 global_orient_init_seq = []
                                 global_orient_init_3D = []
+                                transl_seq = []
                                 frame_ids_seq = []
 
                             pose = hand_params[hand_side]['pose']
                             betas_seq.append(hand_params[hand_side]['shape'][:smpl_body.num_betas])
+                            transl_seq.append(hand_params[hand_side]['trans'])
 
                             global_orient_seq.append(pose[:3])
                             body_pose_seq.append(pose[3:3 + num_body_joints * 3])
@@ -150,8 +154,10 @@ class SMPLDataset(torch.utils.data.Dataset):
                     dataset['hand_pose'].append(np.array(body_pose_seq))
                     dataset['global_orient'].append(np.array(global_orient_seq))
                     dataset['global_orient_init'].append(np.array(global_orient_init_seq))
+                    dataset['transl'].append(np.array(transl_seq))
                     dataset['seq_names'].append(seq_names_seq)
                     dataset['frame_ids'].append(frame_ids_seq)
+
                 # print("Frames:")
                 # print(frms)
                 # print(":Frames")
