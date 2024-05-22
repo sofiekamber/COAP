@@ -28,7 +28,7 @@ class SMPLDataset(torch.utils.data.Dataset):
         self.data_keys = list(amass_data.keys())
         self.smplx_body = attach_coap(smplx.create(**smpl_cfg), pretrained=False)
         self.faces = self.smplx_body.faces.copy()
-        
+
         self.points_sigma = 0.01
         self.points_uniform_ratio = 0.5
         self.n_points = data_cfg.get('n_points', 256)
@@ -46,18 +46,49 @@ class SMPLDataset(torch.utils.data.Dataset):
         else:
             num_body_joints = smpl_body.NUM_BODY_JOINTS
 
-        data_root = data_cfg['data_root'] 
+        data_root = data_cfg['data_root']
         datasets = data_cfg[split]['datasets']
         select_every = data_cfg[split].get('select_every', 1)
 
         dataset = collections.defaultdict(list)
         if smpl_cfg['model_type'] == 'mano':
             hand_side = 'right' if smpl_body.is_rhand else 'left'
-
+            print(f"mano {hand_side}")
+            left_frames, right_frames, left_sequences, right_sequences, sequences = 0, 0, 0, 0, 0
             for ds in datasets:
                 f = open(os.path.join(data_root, ds, split + '.json'))
                 data = json.load(f)
-
+                last_frame_id = 0
+                for capture_id, frames in data.items():
+                    check_left = False
+                    check_right = False
+                    for i, (frame, hand_params) in enumerate(frames.items()):
+                        if hand_params['left'] and hand_params['right']:
+                            continue
+                        if hand_params['left'] and not check_left:
+                            left_sequences += 1
+                            check_left = True
+                        if hand_params['right'] and not check_right:
+                            right_sequences += 1
+                            check_right = True
+                        if hand_params['left']:
+                            left_frames += 1
+                        if hand_params['right']:
+                            right_frames += 1
+                        last_frame_id = i
+            # print("Frames:")
+            # print(left_frames)
+            # print(right_frames)
+            # print(":Frames")
+            # print("Sequences:")
+            # print(left_sequences)
+            # print(right_sequences)
+            # print(":Sequences")
+            frms = 0
+            sequences = 0
+            for ds in datasets:
+                f = open(os.path.join(data_root, ds, split + '.json'))
+                data = json.load(f)
                 for capture_id, frames in data.items():
                     seq_id = 0
                     seq_name = capture_id + "_" + str(seq_id)
@@ -69,26 +100,29 @@ class SMPLDataset(torch.utils.data.Dataset):
                     global_orient_init_3D = []
                     frame_ids_seq = []
                     last_frame_id = 0
-                    for i, (frame, hand_params) in enumerate(frames.items()):
-                        if i % select_every == 0:
+                    i = 0
+                    for (frame, hand_params) in frames.items():
+                        # Check if new sequence
+                        if not hand_params[hand_side]:
+                            # If hand side is not available, skip
+                            continue
+                        if int(frame) % select_every == 0:
+                            if last_frame_id + select_every != int(frame) and seq_names_seq:
+                                if len(frame_ids_seq) > 1:
+                                    sequences += 1
+                                    # Store other sequence
+                                    dataset['betas'].append(np.array(betas_seq))
+                                    dataset['hand_pose'].append(np.array(body_pose_seq))
+                                    dataset['global_orient'].append(np.array(global_orient_seq))
+                                    dataset['global_orient_init'].append(np.array(global_orient_init_seq))
+                                    dataset['seq_names'].append(seq_names_seq)
+                                    dataset['frame_ids'].append(frame_ids_seq)
 
-                            # Check if new sequence
-                            if not hand_params[hand_side]:
-                                # If hand side is not available, skip
-                                continue
-
-                            if last_frame_id + select_every != i and seq_names_seq:
-                                #Store other sequence
-                                dataset['betas'].append(np.array(betas_seq))
-                                dataset['body_pose'].append(np.array(body_pose_seq))
-                                dataset['global_orient'].append(np.array(global_orient_seq))
-                                dataset['global_orient_init'].append(np.array(global_orient_init_seq))
-                                dataset['seq_names'].append(seq_names_seq)
-                                dataset['frame_ids'].append(frame_ids_seq)
-
-                                #Create new sequence
-                                seq_id += 1
-                                seq_name = capture_id + "_" + str(seq_id)
+                                    # Create new sequence
+                                    seq_id += 1
+                                    seq_name = capture_id + "_" + str(seq_id)
+                                else:
+                                    frms -= 1
                                 betas_seq = []
                                 body_pose_seq = []
                                 global_orient_seq = []
@@ -97,10 +131,8 @@ class SMPLDataset(torch.utils.data.Dataset):
                                 global_orient_init_3D = []
                                 frame_ids_seq = []
 
-
                             pose = hand_params[hand_side]['pose']
                             betas_seq.append(hand_params[hand_side]['shape'][:smpl_body.num_betas])
-
 
                             global_orient_seq.append(pose[:3])
                             body_pose_seq.append(pose[3:3 + num_body_joints * 3])
@@ -110,21 +142,29 @@ class SMPLDataset(torch.utils.data.Dataset):
                             if not global_orient_init_3D:
                                 global_orient_init_3D = pose[:3]
                             global_orient_init_seq.append(global_orient_init_3D)
-
-                            last_frame_id = i
-
-                    #Save last sequence
+                            last_frame_id = int(frame)
+                            frms += 1
+                        i += 1
+                    # Save last sequence
                     dataset['betas'].append(np.array(betas_seq))
-                    dataset['body_pose'].append(np.array(body_pose_seq))
+                    dataset['hand_pose'].append(np.array(body_pose_seq))
                     dataset['global_orient'].append(np.array(global_orient_seq))
                     dataset['global_orient_init'].append(np.array(global_orient_init_seq))
                     dataset['seq_names'].append(seq_names_seq)
                     dataset['frame_ids'].append(frame_ids_seq)
+                # print("Frames:")
+                # print(frms)
+                # print(":Frames")
+                # print("Sequences:")
+                # print(sequences)
+                # print(":Sequences")
         else:
             for ds in datasets:
-                subject_dirs = [s_dir for s_dir in sorted(glob.glob(os.path.join(data_root, ds, '*'))) if os.path.isdir(s_dir)]
+                subject_dirs = [s_dir for s_dir in sorted(glob.glob(os.path.join(data_root, ds, '*'))) if
+                                os.path.isdir(s_dir)]
                 for subject_dir in subject_dirs:
-                    seq_paths = [sn for sn in glob.glob(os.path.join(subject_dir, '*.npz')) if not sn.endswith('shape.npz') and not sn.endswith('neutral_stagei.npz')]
+                    seq_paths = [sn for sn in glob.glob(os.path.join(subject_dir, '*.npz')) if
+                                 not sn.endswith('shape.npz') and not sn.endswith('neutral_stagei.npz')]
                     for seq_path in seq_paths:
                         seq_sample = np.load(seq_path, allow_pickle=True)
                         pose = seq_sample['poses'][::select_every]
@@ -133,17 +173,19 @@ class SMPLDataset(torch.utils.data.Dataset):
 
                         dataset['betas'].append(betas.repeat(n_frames, axis=0))
                         dataset['global_orient'].append(pose[:, :3])
-                        dataset['body_pose'].append(pose[:, 3:3+num_body_joints*3])
+                        dataset['body_pose'].append(pose[:, 3:3 + num_body_joints * 3])
 
                         dataset['global_orient_init'].append(pose[:1, :3].repeat(n_frames, axis=0))
-                        seq_name = os.path.join(os.path.basename(subject_dir), os.path.splitext(os.path.basename(seq_path))[0])
-                        dataset['seq_names'].append([seq_name]*n_frames)
-                        dataset['frame_ids'].append(list(map(lambda x: f'{x:06d}', list(range(seq_sample['poses'].shape[0]))[::select_every])))
+                        seq_name = os.path.join(os.path.basename(subject_dir),
+                                                os.path.splitext(os.path.basename(seq_path))[0])
+                        dataset['seq_names'].append([seq_name] * n_frames)
+                        dataset['frame_ids'].append(
+                            list(map(lambda x: f'{x:06d}', list(range(seq_sample['poses'].shape[0]))[::select_every])))
 
                         if model_type == 'smplx' or model_type == 'smplh':
-                            b_ind = 3+num_body_joints*3
-                            dataset['left_hand_pose'].append(pose[:, b_ind:b_ind+45])
-                            dataset['right_hand_pose'].append(pose[:, b_ind+45:b_ind+2*45])
+                            b_ind = 3 + num_body_joints * 3
+                            dataset['left_hand_pose'].append(pose[:, b_ind:b_ind + 45])
+                            dataset['right_hand_pose'].append(pose[:, b_ind + 45:b_ind + 2 * 45])
                         elif model_type == 'smpl':  # flatten hands for smpl
                             dataset['body_pose'][-1][:, -6:] = 0
 
@@ -158,26 +200,28 @@ class SMPLDataset(torch.utils.data.Dataset):
 
     def sample_points(self, smpl_output):
         bone_trans = self.smplx_body.coap.compute_bone_trans(smpl_output.full_pose, smpl_output.joints)
-        bbox_min, bbox_max = self.smplx_body.coap.get_bbox_bounds(smpl_output.vertices, bone_trans)  # (B, K, 1, 3) [can space]
+        bbox_min, bbox_max = self.smplx_body.coap.get_bbox_bounds(smpl_output.vertices,
+                                                                  bone_trans)  # (B, K, 1, 3) [can space]
         n_parts = bbox_max.shape[1]
 
         #### Sample points inside local boxes
         n_points_uniform = int(self.n_points * self.points_uniform_ratio)
         n_points_surface = self.n_points - n_points_uniform
 
-        bbox_size = (bbox_max - bbox_min).abs()*self.smplx_body.coap.bbox_padding - 1e-3  # (B,K,1,3)
+        bbox_size = (bbox_max - bbox_min).abs() * self.smplx_body.coap.bbox_padding - 1e-3  # (B,K,1,3)
         bbox_center = (bbox_min + bbox_max) * 0.5
-        bb_min = (bbox_center - bbox_size*0.5)  # to account for padding
-        
+        bb_min = (bbox_center - bbox_size * 0.5)  # to account for padding
+
         uniform_points = bb_min + torch.rand((1, n_parts, n_points_uniform, 3)) * bbox_size  # [0,bs] (B,K,N,3)
 
         # project points to the posed space
         abs_transforms = torch.inverse(bone_trans)  # B,K,4,4
-        uniform_points = (abs_transforms.reshape(1, n_parts, 1, 4, 4).repeat(1, 1, n_points_uniform, 1, 1) @ F.pad(uniform_points, [0, 1], "constant", 1.0).unsqueeze(-1))[..., :3, 0]
+        uniform_points = (abs_transforms.reshape(1, n_parts, 1, 4, 4).repeat(1, 1, n_points_uniform, 1, 1) @ F.pad(
+            uniform_points, [0, 1], "constant", 1.0).unsqueeze(-1))[..., :3, 0]
 
         #### Sample surface points
-        meshes = Meshes(smpl_output.vertices.float().expand(n_parts, -1, -1), 
-            self.smplx_body.coap.get_tight_face_tensor())
+        meshes = Meshes(smpl_output.vertices.float().expand(n_parts, -1, -1),
+                        self.smplx_body.coap.get_tight_face_tensor())
         surface_points = sample_points_from_meshes(meshes, num_samples=n_points_surface)
         surface_points += torch.from_numpy(np.random.normal(scale=self.points_sigma, size=surface_points.shape))
         surface_points = surface_points.reshape((1, n_parts, -1, 3))
@@ -190,22 +234,14 @@ class SMPLDataset(torch.utils.data.Dataset):
         gt_occ = check_mesh_contains(mesh, points).astype(np.float32)
         return dict(points=points, gt_occ=gt_occ)
 
-
     @torch.no_grad()
     def __getitem__(self, idx):
-        smpl_data = {key: self.amass_data[key][idx:idx+1] for key in self.data_keys}
+        smpl_data = {key: self.amass_data[key][idx:idx + 1] for key in self.data_keys}
         smpl_output = self.smplx_body(**smpl_data, return_verts=True, return_full_pose=True)  # smpl fwd pass
-
-        # Viszualize smpl output
-        posed_mesh = trimesh.Trimesh(smpl_output.vertices[0].detach().cpu().numpy(), self.faces)
-        # Save mesh
-        save_path = '/home/ETH/Master_2/DigitalHumans/data_mano/Vis/mesh.obj'
-
-        assert (False)
-
-        smpl_data = {key: val.squeeze(0) if torch.is_tensor(val) else val[0] for key, val in smpl_data.items()}  # remove B dim
+        smpl_data = {key: val.squeeze(0) if torch.is_tensor(val) else val[0] for key, val in
+                     smpl_data.items()}  # remove B dim
         smpl_data.update(self.sample_points(smpl_output))
         return smpl_data
-    
+
     def __len__(self):
         return len(self.amass_data[self.data_keys[0]])

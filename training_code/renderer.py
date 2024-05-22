@@ -23,7 +23,8 @@ class Renderer():
         lights = renderer.PointLights(location=[[0.0, 0.0, 3.0]],
                                            ambient_color=((1, 1, 1),), diffuse_color=((0, 0, 0),),
                                            specular_color=((0, 0, 0),))
-        raster_settings = renderer.RasterizationSettings(image_size=image_size, faces_per_pixel=100, blur_radius=0)
+        raster_settings = renderer.RasterizationSettings(image_size=image_size, faces_per_pixel=100, blur_radius=0,
+                                                         bin_size=-1)
         rasterizer = renderer.MeshRasterizer(cameras=cameras, raster_settings=raster_settings)
         shader = renderer.HardPhongShader(cameras=cameras, lights=lights)
         shader = renderer.SoftPhongShader(cameras=cameras, lights=lights)
