@@ -17,6 +17,18 @@ from leap.tools.libmesh import check_mesh_contains
 
 from coap import attach_coap
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+def visualize_point_cloud(points):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(points[:, 0], points[:, 1], points[:, 2])
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    plt.show()
+
 class SMPLDataset(torch.utils.data.Dataset):
 
     @torch.no_grad()
@@ -238,6 +250,11 @@ class SMPLDataset(torch.utils.data.Dataset):
         points = points.reshape(-1, 3).numpy()
         mesh = trimesh.Trimesh(smpl_output.vertices.squeeze().numpy(), self.faces, process=False)
         gt_occ = check_mesh_contains(mesh, points).astype(np.float32)
+
+        # Visualize occupied points
+        occupied_points = points[gt_occ == 1]
+        visualize_point_cloud(occupied_points)
+
         return dict(points=points, gt_occ=gt_occ)
 
     @torch.no_grad()
