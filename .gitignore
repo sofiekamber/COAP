@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+COAP/.idea/
+COAP/InterHand2.6/
