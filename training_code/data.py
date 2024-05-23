@@ -17,17 +17,46 @@ from leap.tools.libmesh import check_mesh_contains
 
 from coap import attach_coap
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+SEAL_FACES_R = [
+    [120, 108, 778],
+    [108, 79, 778],
+    [79, 78, 778],
+    [78, 121, 778],
+    [121, 214, 778],
+    [214, 215, 778],
+    [215, 279, 778],
+    [279, 239, 778],
+    [239, 234, 778],
+    [234, 92, 778],
+    [92, 38, 778],
+    [38, 122, 778],
+    [122, 118, 778],
+    [118, 117, 778],
+    [117, 119, 778],
+    [119, 120, 778],
+]
+# vertex ids around the ring of the wrist
+CIRCLE_V_ID = np.array(
+    [108, 79, 78, 121, 214, 215, 279, 239, 234, 92, 38, 122, 118, 117, 119, 120],
+    dtype=np.int64,
+)
 
-def visualize_point_cloud(points):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(points[:, 0], points[:, 1], points[:, 2])
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    plt.show()
+
+def seal_mano_mesh(v3d, faces, is_rhand, device):
+    # v3d: B, 778, 3
+    # faces: 1538, 3
+    # output: v3d(B, 779, 3); faces (1554, 3)
+
+    seal_faces = torch.LongTensor(np.array(SEAL_FACES_R)).to(device)
+    if not is_rhand:
+        # left hand
+        seal_faces = seal_faces[:, np.array([1, 0, 2])]  # invert face normal
+    centers = v3d[:, CIRCLE_V_ID].mean(dim=1)[:, None, :]
+    sealed_vertices = torch.cat((v3d, centers), dim=1)
+    faces = torch.from_numpy(faces.astype(np.int64)).to(device)
+    faces = torch.cat((faces, seal_faces), dim=0)
+    return sealed_vertices, faces
+
 
 class SMPLDataset(torch.utils.data.Dataset):
 
@@ -246,14 +275,16 @@ class SMPLDataset(torch.utils.data.Dataset):
 
         points = torch.cat((uniform_points, surface_points), dim=-2).float()  # B,K,n_points,3
 
+        if self.smpl_cfg['model_type'] == 'mano':
+            vertices, faces = seal_mano_mesh(smpl_output.vertices, self.smplx_body.faces, self.smplx_body.is_rhand, smpl_output.vertices.device)
+        else:
+            vertices = smpl_output.vertices
+            faces = self.faces
+
         #### Check occupancy
         points = points.reshape(-1, 3).numpy()
-        mesh = trimesh.Trimesh(smpl_output.vertices.squeeze().numpy(), self.faces, process=False)
+        mesh = trimesh.Trimesh(vertices.squeeze().numpy(), faces, process=False)
         gt_occ = check_mesh_contains(mesh, points).astype(np.float32)
-
-        # Visualize occupied points
-        occupied_points = points[gt_occ == 1]
-        visualize_point_cloud(occupied_points)
 
         return dict(points=points, gt_occ=gt_occ)
 

@@ -53,6 +53,7 @@ class Partitioner(torch.nn.Module):
         ], reverse=True),
 
         'mano': sorted([
+            3, 6, 9, 12 # merge all fingertips except thumb
         ], reverse=True)
     }
     SELFPEN_DISABLE_PARTS = {  # disable close connections for self-penetration
