@@ -40,12 +40,12 @@ def visualize(model=None, smpl_output=None, scene_mesh=None, query_samples=None,
 
     if smpl_output is not None:
         #posed_mesh = model.coap.extract_mesh(smpl_output, use_mise=True)[0]
-        # posed_mesh = trimesh.Trimesh(vertices=posed_mesh.vertices, faces=posed_mesh.faces)
+        #posed_mesh = trimesh.Trimesh(vertices=posed_mesh.vertices, faces=posed_mesh.faces)
         posed_mesh = trimesh.Trimesh(smpl_output.vertices[0].detach().cpu().numpy(), model.faces)
 
         VIEWER.scene.add(pyrender.Mesh.from_trimesh(posed_mesh))
 
-    VIEWER.scene.add(pyrender.Mesh.from_trimesh(scene_mesh))
+    #VIEWER.scene.add(pyrender.Mesh.from_trimesh(scene_mesh))
     if query_samples is not None:
         VIEWER.scene.add(vis_create_pc(query_samples, color=(0.0, 1.0, 0.0)))
     if collision_samples is not None:
@@ -60,12 +60,31 @@ def to_tensor(x, device):
         return torch.from_numpy(x).to(device=device)
     return x
 
+#m = [15, 14, 13, 3, 2, 1, 6, 5, 4, 12, 11, 10, 9, 8, 7, 0]
+m = range(0, 16)
+#m = [0,4,5,6,1,2,3,7,8,9,10,11,12,13,14,15]
+def reorder(pose):
+    res = []
+    for i in range(16):
+        if True:
+            res.append(pose[0][3*m[i]])
+            res.append(pose[0][3*m[i]+1])
+            res.append(pose[0][3*m[i]+2])
+        else:
+            res.append(0)
+            res.append(0)
+            res.append(0)
+    return np.array([res])
+
 def main():
     side = 'right'
-    with open("samples/selfpen_examples/mano/all_val.json", 'r') as f:
+    with open("samples/selfpen_examples/mano/train.json", 'r') as f:
         all = json.load(f)
     for x in all.values():
-        for j in x.values():
+        for k,j in x.items():
+            #print(k)
+            if k != "54650":
+                continue
             if j[side]:
                 j[side]['pose'] = np.array([j[side]['pose']], dtype=np.float32)
                 j[side]['shape'] = np.array([j[side]['shape']], dtype=np.float32)
@@ -74,22 +93,17 @@ def main():
                 torch_param = {key: to_tensor(val, 'cuda') for key, val in j.items()}
                 #print(torch_param)
                 smpl_body_pose = torch.zeros((1, 48), dtype=torch.float, device='cuda')
-                smpl_body_pose[:, :48] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['pose']).to('cuda')
+                smpl_body_pose[:, :48] = torch.from_numpy(reorder(torch_param['right' if torch_param['right'] else 'left']['pose'])).to('cuda')
                 torch_param['hand_pose'] = smpl_body_pose.to(torch.float32)
                 torch_param['betas'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['shape']).to(torch.float32).to('cuda')
                 torch_param['transl'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['trans']).to(torch.float32).to('cuda')
 
                 data = torch_param
                 scene_mesh = trimesh.load_mesh('/home/rafael/PycharmProjects/DigitalHumans/volumetric-hand-model/COAP-hand/tutorials/samples/scene_collision/bunny.obj')
-                key_pose = 'hand_pose'
-                print(data[key_pose])
+                #print(data[key_pose])
                 model = smplx.create(model_path="/home/rafael/Downloads/Models", is_rhand=bool(data['right']), model_type='mano', gender='neutral',
-                                     num_pca_comps=1)
+                                     num_pca_comps=1).to('cuda')
                 model = attach_coap(model, pretrained=True, device='cuda')
-
-                scene_vertices = torch.from_numpy(scene_mesh.vertices).to(device='cuda', dtype=torch.float)
-                scene_normals = torch.from_numpy(np.asarray(scene_mesh.vertex_normals).copy()).to(device='cuda',
-                                                                                                  dtype=torch.float)
 
                 # visualize
                 smpl_output = model(**data, return_verts=True, return_full_pose=True)
@@ -97,6 +111,7 @@ def main():
                 assert model.joint_mapper is None, 'COAP requires valid SMPL joints as input'
                 #print(data)
                 visualize(model, smpl_output, scene_mesh)
+
 
 VISUALIZE = True
 if VISUALIZE:

@@ -30,7 +30,7 @@ def attach_coap(parametric_body: smplx.SMPL, pretrained=True, device=None):
                 else:
                     param.fill_(0)
     setattr(parametric_body, 'reset_params', lambda **x: reset_params(parametric_body, **x))
-
+    
     return parametric_body
 
 __all__ = [

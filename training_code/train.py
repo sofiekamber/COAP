@@ -14,8 +14,8 @@ from skimage.io import imsave
 
 from coap import attach_coap
 
-from .data import SMPLDataset
-from .renderer import Renderer
+from data import SMPLDataset
+from renderer import Renderer
 
 
 class COAPModule(pl.LightningModule):

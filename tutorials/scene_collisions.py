@@ -41,7 +41,7 @@ def visualize(model=None, smpl_output=None, scene_mesh=None, query_samples=None,
         VIEWER.scene.mesh_nodes.pop()
 
     if smpl_output is not None:
-        # posed_mesh = model.coap.extract_mesh(smpl_output, use_mise=True)[0]
+        #posed_mesh = model.coap.extract_mesh(smpl_output, use_mise=True)[0]
         # posed_mesh = trimesh.Trimesh(vertices=posed_mesh.vertices, faces=posed_mesh.faces)
         posed_mesh = trimesh.Trimesh(smpl_output.vertices[0].detach().cpu().numpy(), model.faces)
 
@@ -66,6 +66,24 @@ def load_smpl_data(pkl_path):
     with open(pkl_path, 'rb') as f:
         param = pickle.load(f)
     torch_param = {key: to_tensor(val, args.device) for key, val in param.items()}
+
+    # for visualization -- disable global rotation and translation as they do not influence self-penetration
+    for zero_key in ['global_orient', 'transl', 'left_hand_pose', 'right_hand_pose']:
+        if zero_key in torch_param:
+            torch_param[zero_key][:] = 0.0
+
+    if args.model_type == 'smpl':
+        smpl_body_pose = torch.zeros((1, 69), dtype=torch.float, device=args.device)
+        smpl_body_pose[:, :63] = torch_param['body_pose']
+        torch_param['body_pose'] = smpl_body_pose
+
+    if args.model_type == 'mano':
+        smpl_body_pose = torch.zeros((1, 48), dtype=torch.float, device=args.device)
+        smpl_body_pose[:, :48] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['pose']).to(args.device)
+        torch_param['hand_pose'] = smpl_body_pose.to(torch.float32)
+        torch_param['betas'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['shape']).to(torch.float32).to(args.device)
+        torch_param['transl'] = torch.from_numpy(np.array([[-5.0101800e-003, 1.5031957e-001, 3.0754370e-002]])).to(torch.float32).to(args.device)
+
     return torch_param
 
 @torch.no_grad()
@@ -105,24 +123,36 @@ def main():
     scene_mesh = trimesh.load_mesh(args.scan_path)
 
     # create a SMPL body and attach COAP
-    model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender, num_pca_comps=12)
+    if (args.model_type == 'mano'):
+        key_pose = 'hand_pose'
+        '''for i in range(len(data[key_pose][0])):
+            if i % 1 == 0:
+                data[key_pose][0][i] *= -1'''
+        print(data[key_pose])
+        model = smplx.create(model_path=args.bm_dir_path, is_rhand=bool(data['right']), model_type=args.model_type, gender=args.gender,
+                             num_pca_comps=1)
+    else:
+        key_pose = 'body_pose'
+        model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender,
+                             num_pca_comps=12)
     model = attach_coap(model, pretrained=True, device=args.device)
-    
+
     scene_vertices = torch.from_numpy(scene_mesh.vertices).to(device=args.device, dtype=torch.float)
-    scene_normals = torch.from_numpy(np.asarray(scene_mesh.vertex_normals).copy()).to(device=args.device, dtype=torch.float)
+    scene_normals = torch.from_numpy(np.asarray(scene_mesh.vertex_normals).copy()).to(device=args.device,
+                                                                                      dtype=torch.float)
 
     # visualize
     smpl_output = model(**data, return_verts=True, return_full_pose=True)
     # NOTE: make sure that smpl_output contains the valid SMPL variables (pose parameters, joints, and vertices). 
     assert model.joint_mapper is None, 'COAP requires valid SMPL joints as input'
-
+    #print(data)
     visualize(model, smpl_output, scene_mesh)
     print('waiting 5 seconds')
     time.sleep(5)
     
     # create an optimizer
-    init_pose = data['body_pose'].detach().clone()
-    params_to_optimize = ['transl']#, 'global_orient'
+    init_pose = data[key_pose].detach().clone()
+    params_to_optimize = [key_pose]#'transl', 'global_orient'
     for param in params_to_optimize:
         data[param].requires_grad = True
     opt = torch.optim.Adam([data[param] for param in params_to_optimize], lr=args.lr)
@@ -163,7 +193,7 @@ if __name__ == '__main__':
     
     # SMPL specification
     parser.add_argument('--bm_dir_path', type=str, required=True, help='Directory with SMPL bodies.')
-    parser.add_argument('--model_type', type=str, choices=['smpl', 'smplx'], default='smplx', help='SMPL-based body type.')
+    parser.add_argument('--model_type', type=str, choices=['smpl', 'smplx', 'mano'], default='smplx', help='SMPL-based body type.')
     parser.add_argument('--gender', type=str, choices=['male', 'female', 'neutral'], default='neutral', help='SMPL gender.')
 
     # data samples

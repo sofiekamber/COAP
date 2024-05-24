@@ -13,7 +13,7 @@ smpl_cfg:
 data_cfg:
   train:
     datasets: ['InterHand2.6M']  # training datasets
-    select_every: 10  # select every nth frame from the datasets
+    select_every: 9  # select every nth frame from the datasets
   val:
     datasets: ['InterHand2.6M']  # validation datasets
-    select_every: 100
+    select_every: 9

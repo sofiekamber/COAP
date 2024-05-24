@@ -70,20 +70,35 @@ def load_smpl_data(pkl_path):
         smpl_body_pose[:, :63] = torch_param['body_pose']
         torch_param['body_pose'] = smpl_body_pose
 
-    return torch_param
+    if args.model_type == 'mano':
+        smpl_body_pose = torch.zeros((1, 48), dtype=torch.float, device=args.device)
+        if torch_param['right'] :
+            smpl_body_pose[:, :48] = torch.from_numpy(torch_param['right']['pose']).to(args.device)
+            torch_param['betas'] = torch.from_numpy(torch_param['right']['shape']).to(args.device)
+        else:
+            smpl_body_pose[:, :48] = torch.from_numpy(torch_param['left']['pose']).to(args.device)
+            torch_param['betas'] = torch.from_numpy(torch_param['left']['shape']).to(args.device)
+        torch_param['hand_pose'] = smpl_body_pose
 
+    return torch_param
 
 def main():
     # create a SMPL body and attach COAP
-    model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender, num_pca_comps=12)
+    if args.model_type == 'mano':
+        key_pose = 'hand_pose'
+        model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender,
+                             num_pca_comps=1)
+    else:
+        key_pose = 'body_pose'
+        model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender,
+                             num_pca_comps=12)
     assert model.joint_mapper is None, 'COAP requires valid SMPL joints as input'
     model = attach_coap(model, device=args.device)
 
     data = load_smpl_data(args.sample_body)
-    init_pose = data['body_pose'].detach().clone()
-
-    data['body_pose'].requires_grad = True
-    opt = torch.optim.SGD([data['body_pose']], lr=args.lr)
+    init_pose = data[key_pose].detach().clone()
+    data[key_pose].requires_grad = True
+    opt = torch.optim.SGD([data[key_pose]], lr=args.lr)
 
     for step in range(args.max_iters):
         # smpl forward pass
@@ -94,7 +109,7 @@ def main():
         selfpen_loss, _samples = model.coap.self_collision_loss(smpl_output, ret_samples=True)
 
         # pose prior
-        pose_prior_loss = args.pose_prior_weight*F.mse_loss(init_pose, data['body_pose'])
+        pose_prior_loss = args.pose_prior_weight*F.mse_loss(init_pose, data[key_pose])
 
         # visualization and opt step 
         selfpen_loss = selfpen_loss*args.selfpen_weight
@@ -122,7 +137,7 @@ if __name__ == '__main__':
 
     # SMPL specification
     parser.add_argument('--bm_dir_path', type=str, required=True, help='Directory with SMPL bodies.')
-    parser.add_argument('--model_type', type=str, choices=['smpl', 'smplx'], default='smplx', help='SMPL-based body type.')
+    parser.add_argument('--model_type', type=str, choices=['smpl', 'smplx', 'mano'], default='smplx', help='SMPL-based body type.')
     parser.add_argument('--gender', type=str, choices=['male', 'female', 'neutral'], default='neutral', help='SMPL gender.')
 
     # data samples
