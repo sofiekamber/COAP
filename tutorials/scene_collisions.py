@@ -82,7 +82,7 @@ def load_smpl_data(pkl_path):
         smpl_body_pose[:, :48] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['pose']).to(args.device)
         torch_param['hand_pose'] = smpl_body_pose.to(torch.float32)
         torch_param['betas'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['shape']).to(torch.float32).to(args.device)
-        torch_param['transl'] = torch.from_numpy(np.array([[0,0.15,0]])).to(torch.float32).to(args.device)
+        torch_param['transl'] = torch.from_numpy(np.array([[0,0,0]])).to(torch.float32).to(args.device)
 
     return torch_param
 
