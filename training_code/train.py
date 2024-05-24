@@ -55,7 +55,7 @@ class COAPModule(pl.LightningModule):
     def forward(self, batch, points, ret_intermediate=False):
         smpl_output = self.smpl_body(**batch, return_verts=True, return_full_pose=True)
         return self.smpl_body.coap.query(points, smpl_output, ret_intermediate=ret_intermediate)
-    
+
     def training_step(self, batch, batch_idx):
         pred_occ, inter_log = self(batch, batch['points'], ret_intermediate=True)
         tr_inds = ~inter_log['all_out']
@@ -142,6 +142,18 @@ class COAPModule(pl.LightningModule):
             mesh.export(os.path.join(dst_mesh_dir, f'{frame_id}.ply'))
             imsave(os.path.join(dst_image_dir, f'{frame_id}.png'), image)
             imsave(os.path.join(dst_smpl_image_dir, f'{frame_id}.png'), smpl_image)
+
+            global_orient_init = smplx.lbs.batch_rodrigues(batch['global_orient_init'].reshape(-1, 3))
+            global_orient_init = global_orient_init.cpu().numpy()
+
+            mesh_vertices = smpl_output.vertices[b_ind].detach().cpu().numpy()
+            mesh_vertices = (global_orient_init[b_ind].T @ mesh_vertices.T).T
+
+            # Export GT Mesh
+            posed_mesh = trimesh.Trimesh(mesh_vertices, self.smpl_body.faces)
+
+            # Save mesh
+            posed_mesh.export(os.path.join(dst_mesh_dir, f'{frame_id}_MANO_MESH.ply'))
 
     @torch.no_grad()
     def visualize(self, batch, smpl_output):

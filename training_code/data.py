@@ -17,6 +17,46 @@ from leap.tools.libmesh import check_mesh_contains
 
 from coap import attach_coap
 
+SEAL_FACES_R = [
+    [120, 108, 778],
+    [108, 79, 778],
+    [79, 78, 778],
+    [78, 121, 778],
+    [121, 214, 778],
+    [214, 215, 778],
+    [215, 279, 778],
+    [279, 239, 778],
+    [239, 234, 778],
+    [234, 92, 778],
+    [92, 38, 778],
+    [38, 122, 778],
+    [122, 118, 778],
+    [118, 117, 778],
+    [117, 119, 778],
+    [119, 120, 778],
+]
+# vertex ids around the ring of the wrist
+CIRCLE_V_ID = np.array(
+    [108, 79, 78, 121, 214, 215, 279, 239, 234, 92, 38, 122, 118, 117, 119, 120],
+    dtype=np.int64,
+)
+
+
+def seal_mano_mesh(v3d, faces, is_rhand, device):
+    # v3d: B, 778, 3
+    # faces: 1538, 3
+    # output: v3d(B, 779, 3); faces (1554, 3)
+
+    seal_faces = torch.LongTensor(np.array(SEAL_FACES_R)).to(device)
+    if not is_rhand:
+        # left hand
+        seal_faces = seal_faces[:, np.array([1, 0, 2])]  # invert face normal
+    centers = v3d[:, CIRCLE_V_ID].mean(dim=1)[:, None, :]
+    sealed_vertices = torch.cat((v3d, centers), dim=1)
+    faces = torch.from_numpy(faces.astype(np.int64)).to(device)
+    faces = torch.cat((faces, seal_faces), dim=0)
+    return sealed_vertices, faces
+
 
 class SMPLDataset(torch.utils.data.Dataset):
 
@@ -54,6 +94,7 @@ class SMPLDataset(torch.utils.data.Dataset):
         dataset = collections.defaultdict(list)
         if smpl_cfg['model_type'] == 'mano':
             hand_side = 'right' if smpl_body.is_rhand else 'left'
+            print(f"mano {hand_side}")
             left_frames, right_frames, left_sequences, right_sequences, sequences = 0, 0, 0, 0, 0
             for ds in datasets:
                 f = open(os.path.join(data_root, ds, split + '.json'))
@@ -76,14 +117,14 @@ class SMPLDataset(torch.utils.data.Dataset):
                         if hand_params['right']:
                             right_frames += 1
                         last_frame_id = i
-            print("Frames:")
-            print(left_frames)
-            print(right_frames)
-            print(":Frames")
-            print("Sequences:")
-            print(left_sequences)
-            print(right_sequences)
-            print(":Sequences")
+            # print("Frames:")
+            # print(left_frames)
+            # print(right_frames)
+            # print(":Frames")
+            # print("Sequences:")
+            # print(left_sequences)
+            # print(right_sequences)
+            # print(":Sequences")
             frms = 0
             sequences = 0
             for ds in datasets:
@@ -98,6 +139,7 @@ class SMPLDataset(torch.utils.data.Dataset):
                     seq_names_seq = []
                     global_orient_init_seq = []
                     global_orient_init_3D = []
+                    transl_seq = []
                     frame_ids_seq = []
                     last_frame_id = 0
                     i = 0
@@ -112,9 +154,10 @@ class SMPLDataset(torch.utils.data.Dataset):
                                     sequences += 1
                                     # Store other sequence
                                     dataset['betas'].append(np.array(betas_seq))
-                                    dataset['body_pose'].append(np.array(body_pose_seq))
+                                    dataset['hand_pose'].append(np.array(body_pose_seq))
                                     dataset['global_orient'].append(np.array(global_orient_seq))
                                     dataset['global_orient_init'].append(np.array(global_orient_init_seq))
+                                    dataset['transl'].append(np.array(transl_seq))
                                     dataset['seq_names'].append(seq_names_seq)
                                     dataset['frame_ids'].append(frame_ids_seq)
 
@@ -129,10 +172,12 @@ class SMPLDataset(torch.utils.data.Dataset):
                                 seq_names_seq = []
                                 global_orient_init_seq = []
                                 global_orient_init_3D = []
+                                transl_seq = []
                                 frame_ids_seq = []
 
                             pose = hand_params[hand_side]['pose']
                             betas_seq.append(hand_params[hand_side]['shape'][:smpl_body.num_betas])
+                            transl_seq.append(hand_params[hand_side]['trans'])
 
                             global_orient_seq.append(pose[:3])
                             body_pose_seq.append(pose[3:3 + num_body_joints * 3])
@@ -147,17 +192,19 @@ class SMPLDataset(torch.utils.data.Dataset):
                         i += 1
                     # Save last sequence
                     dataset['betas'].append(np.array(betas_seq))
-                    dataset['body_pose'].append(np.array(body_pose_seq))
+                    dataset['hand_pose'].append(np.array(body_pose_seq))
                     dataset['global_orient'].append(np.array(global_orient_seq))
                     dataset['global_orient_init'].append(np.array(global_orient_init_seq))
+                    dataset['transl'].append(np.array(transl_seq))
                     dataset['seq_names'].append(seq_names_seq)
                     dataset['frame_ids'].append(frame_ids_seq)
-                print("Frames:")
-                print(frms)
-                print(":Frames")
-                print("Sequences:")
-                print(sequences)
-                print(":Sequences")
+
+                # print("Frames:")
+                # print(frms)
+                # print(":Frames")
+                # print("Sequences:")
+                # print(sequences)
+                # print(":Sequences")
         else:
             for ds in datasets:
                 subject_dirs = [s_dir for s_dir in sorted(glob.glob(os.path.join(data_root, ds, '*'))) if
@@ -228,10 +275,17 @@ class SMPLDataset(torch.utils.data.Dataset):
 
         points = torch.cat((uniform_points, surface_points), dim=-2).float()  # B,K,n_points,3
 
+        if self.smpl_cfg['model_type'] == 'mano':
+            vertices, faces = seal_mano_mesh(smpl_output.vertices, self.smplx_body.faces, self.smplx_body.is_rhand, smpl_output.vertices.device)
+        else:
+            vertices = smpl_output.vertices
+            faces = self.faces
+
         #### Check occupancy
         points = points.reshape(-1, 3).numpy()
-        mesh = trimesh.Trimesh(smpl_output.vertices.squeeze().numpy(), self.faces, process=False)
+        mesh = trimesh.Trimesh(vertices.squeeze().numpy(), faces, process=False)
         gt_occ = check_mesh_contains(mesh, points).astype(np.float32)
+
         return dict(points=points, gt_occ=gt_occ)
 
     @torch.no_grad()

@@ -1,6 +1,6 @@
 
 train_cfg:
-  batch_size: 4
+  batch_size: 8
   num_workers: 10
 
 smpl_cfg:
