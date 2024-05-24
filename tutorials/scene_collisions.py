@@ -82,7 +82,7 @@ def load_smpl_data(pkl_path):
         smpl_body_pose[:, :48] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['pose']).to(args.device)
         torch_param['hand_pose'] = smpl_body_pose.to(torch.float32)
         torch_param['betas'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['shape']).to(torch.float32).to(args.device)
-        torch_param['transl'] = torch.from_numpy(np.array([[-5.0101800e-003, 1.5031957e-001, 3.0754370e-002]])).to(torch.float32).to(args.device)
+        torch_param['transl'] = torch.from_numpy(np.array([[0,0.15,0]])).to(torch.float32).to(args.device)
 
     return torch_param
 
@@ -152,7 +152,7 @@ def main():
     
     # create an optimizer
     init_pose = data[key_pose].detach().clone()
-    params_to_optimize = [key_pose]#'transl', 'global_orient'
+    params_to_optimize = [key_pose, 'transl']#'transl', 'global_orient'
     for param in params_to_optimize:
         data[param].requires_grad = True
     opt = torch.optim.Adam([data[param] for param in params_to_optimize], lr=args.lr)

@@ -18,19 +18,19 @@ HAND_JOINT_NAMES = [
     'wrist', # 0
     'index1',
     'index2',
-    'index3', # 3
+    'index3', # 2
     'middle1',
     'middle2',
-    'middle3', # 6
+    'middle3', # 5
     'pinky1',
     'pinky2',
-    'pinky3', # 9
+    'pinky3', # 8
     'ring1',
     'ring2',
-    'ring3', # 12
+    'ring3', # 11
     'thumb1',
     'thumb2',
-    'thumb3', #15
+    'thumb3', #14
 ]
 class Partitioner(torch.nn.Module):
     MERGE_BODY_PARTS = {
@@ -53,8 +53,7 @@ class Partitioner(torch.nn.Module):
         ], reverse=True),
 
         'mano': sorted([
-            3, 6, 9, 12, 15,  # finger tips
-            2, 5, 8, 11, 14,  # middle finger parts
+            3, 6, 9, 12 # merge all fingertips except thumb
         ], reverse=True)
     }
     SELFPEN_DISABLE_PARTS = {  # disable close connections for self-penetration
@@ -688,7 +687,7 @@ class COAPBodyModel(torch.nn.Module):
         conf_parts = torch.relu(conf_parts)
         loss = (conf_parts.sum(-1) - self.level_set).sum()
         _samples = collision_candidates[conflicting_inds]
-        print(f'\n_samples={_samples.shape[0]} ({collision_candidates.shape[0]})\n', np.array(JOINT_NAMES)[torch.where(self.partitioner.joint_mapper)[0].cpu().detach().numpy()][torch.where(affected_inds)[0].detach().cpu().numpy().tolist()])
+        # print(f'\n_samples={_samples.shape[0]} ({collision_candidates.shape[0]})\n', np.array(JOINT_NAMES)[torch.where(self.partitioner.joint_mapper)[0].cpu().detach().numpy()][torch.where(affected_inds)[0].detach().cpu().numpy().tolist()])
         return loss, _samples, affected_inds
 
     @staticmethod
