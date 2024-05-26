@@ -95,38 +95,7 @@ class SMPLDataset(torch.utils.data.Dataset):
         if smpl_cfg['model_type'] == 'mano':
             hand_side = 'right' if smpl_body.is_rhand else 'left'
             print(f"mano {hand_side}")
-            left_frames, right_frames, left_sequences, right_sequences, sequences = 0, 0, 0, 0, 0
-            for ds in datasets:
-                f = open(os.path.join(data_root, ds, split + '.json'))
-                data = json.load(f)
-                last_frame_id = 0
-                for capture_id, frames in data.items():
-                    check_left = False
-                    check_right = False
-                    for i, (frame, hand_params) in enumerate(frames.items()):
-                        if hand_params['left'] and hand_params['right']:
-                            continue
-                        if hand_params['left'] and not check_left:
-                            left_sequences += 1
-                            check_left = True
-                        if hand_params['right'] and not check_right:
-                            right_sequences += 1
-                            check_right = True
-                        if hand_params['left']:
-                            left_frames += 1
-                        if hand_params['right']:
-                            right_frames += 1
-                        last_frame_id = i
-            # print("Frames:")
-            # print(left_frames)
-            # print(right_frames)
-            # print(":Frames")
-            # print("Sequences:")
-            # print(left_sequences)
-            # print(right_sequences)
-            # print(":Sequences")
-            frms = 0
-            sequences = 0
+
             for ds in datasets:
                 f = open(os.path.join(data_root, ds, split + '.json'))
                 data = json.load(f)
@@ -142,7 +111,6 @@ class SMPLDataset(torch.utils.data.Dataset):
                     transl_seq = []
                     frame_ids_seq = []
                     last_frame_id = 0
-                    i = 0
                     for (frame, hand_params) in frames.items():
                         # Check if new sequence
                         if not hand_params[hand_side]:
@@ -151,7 +119,6 @@ class SMPLDataset(torch.utils.data.Dataset):
                         if int(frame) % select_every == 0:
                             if last_frame_id + select_every != int(frame) and seq_names_seq:
                                 if len(frame_ids_seq) > 1:
-                                    sequences += 1
                                     # Store other sequence
                                     dataset['betas'].append(np.array(betas_seq))
                                     dataset['hand_pose'].append(np.array(body_pose_seq))
@@ -164,8 +131,7 @@ class SMPLDataset(torch.utils.data.Dataset):
                                     # Create new sequence
                                     seq_id += 1
                                     seq_name = capture_id + "_" + str(seq_id)
-                                else:
-                                    frms -= 1
+
                                 betas_seq = []
                                 body_pose_seq = []
                                 global_orient_seq = []
@@ -188,8 +154,7 @@ class SMPLDataset(torch.utils.data.Dataset):
                                 global_orient_init_3D = pose[:3]
                             global_orient_init_seq.append(global_orient_init_3D)
                             last_frame_id = int(frame)
-                            frms += 1
-                        i += 1
+
                     # Save last sequence
                     dataset['betas'].append(np.array(betas_seq))
                     dataset['hand_pose'].append(np.array(body_pose_seq))
@@ -199,12 +164,6 @@ class SMPLDataset(torch.utils.data.Dataset):
                     dataset['seq_names'].append(seq_names_seq)
                     dataset['frame_ids'].append(frame_ids_seq)
 
-                # print("Frames:")
-                # print(frms)
-                # print(":Frames")
-                # print("Sequences:")
-                # print(sequences)
-                # print(":Sequences")
         else:
             for ds in datasets:
                 subject_dirs = [s_dir for s_dir in sorted(glob.glob(os.path.join(data_root, ds, '*'))) if
