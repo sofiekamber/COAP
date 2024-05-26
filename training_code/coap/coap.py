@@ -142,7 +142,9 @@ class Partitioner(torch.nn.Module):
         # variables for resolving self-intersections
         if 'mano' not in self.model_type:
             selfpen_disable_mat = self.get_selfpen_disable_mat(joint_mapper, 24)
-            self.register_buffer('selfpen_disable_mat', selfpen_disable_mat, persistent=False)
+        else:
+            selfpen_disable_mat = self.get_selfpen_disable_mat(joint_mapper, 16)
+        self.register_buffer('selfpen_disable_mat', selfpen_disable_mat, persistent=False)
 
     @torch.no_grad()
     def get_selfpen_disable_mat(self, joint_mapper, n_parts=24):

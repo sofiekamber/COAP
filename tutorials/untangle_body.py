@@ -43,8 +43,12 @@ def visualize(model, smpl_output, samples=None):
 
     # update scene
     VIEWER.scene.add(pyrender.Mesh.from_trimesh(posed_mesh))
+    if args.model_type == 'mano':
+        point_radius = 0.0005
+    else:
+        point_radius = 0.005
     if samples is not None:
-        VIEWER.scene.add(vis_create_pc(samples))
+        VIEWER.scene.add(vis_create_pc(samples, radius=point_radius))
 
     VIEWER.render_lock.release()
 
@@ -70,21 +74,40 @@ def load_smpl_data(pkl_path):
         smpl_body_pose[:, :63] = torch_param['body_pose']
         torch_param['body_pose'] = smpl_body_pose
 
+    if args.model_type == 'mano':
+        side = 'right' if torch_param['right'] else 'left'
+        torch_param['is_rhand'] = side == 'right'
+        mano_pose = torch.FloatTensor(np.array([torch_param[side]['pose']])).view(-1, 3).to(args.device)
+        torch_param['global_orient'] = mano_pose[0].view(1, 3).to(args.device)
+        torch_param['hand_pose'] = mano_pose[1:, :].view(1, -1).to(args.device)
+        torch_param['shape'] = torch.FloatTensor(np.array([torch_param[side]['shape']])).view(1, -1).to(args.device)
+        torch_param['transl'] = torch.FloatTensor(np.array(torch_param[side]['trans'])).view(1, 3).to(args.device)
+
     return torch_param
 
 
 def main():
+    # load data sample
+    data = load_smpl_data(args.sample_body)
     # create a SMPL body and attach COAP
-    model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender, num_pca_comps=12)
+    if (args.model_type == 'mano'):
+        key_pose = 'hand_pose'
+        model = smplx.create(model_path=args.bm_dir_path, is_rhand=data['is_rhand'], model_type='mano',
+                             use_pca=False)
+    else:
+        key_pose = 'body_pose'
+        model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender,
+                             num_pca_comps=12)
     assert model.joint_mapper is None, 'COAP requires valid SMPL joints as input'
     model = attach_coap(model, device=args.device)
 
-    data = load_smpl_data(args.sample_body)
-    init_pose = data['body_pose'].detach().clone()
-
-    data['body_pose'].requires_grad = True
-    opt = torch.optim.SGD([data['body_pose']], lr=args.lr)
-
+    init_pose = data[key_pose].detach().clone()
+    smpl_output = model(**data, return_verts=True, return_full_pose=True)
+    visualize(model, smpl_output)
+    print('waiting 5 seconds')
+    time.sleep(5)
+    data[key_pose].requires_grad = True
+    opt = torch.optim.SGD([data[key_pose]], lr=args.lr)
     for step in range(args.max_iters):
         # smpl forward pass
         smpl_output = model(**data, return_verts=True, return_full_pose=True)
@@ -94,7 +117,7 @@ def main():
         selfpen_loss, _samples = model.coap.self_collision_loss(smpl_output, ret_samples=True)
 
         # pose prior
-        pose_prior_loss = args.pose_prior_weight*F.mse_loss(init_pose, data['body_pose'])
+        pose_prior_loss = args.pose_prior_weight*F.mse_loss(init_pose, data[key_pose])
 
         # visualization and opt step 
         selfpen_loss = selfpen_loss*args.selfpen_weight
@@ -122,7 +145,7 @@ if __name__ == '__main__':
 
     # SMPL specification
     parser.add_argument('--bm_dir_path', type=str, required=True, help='Directory with SMPL bodies.')
-    parser.add_argument('--model_type', type=str, choices=['smpl', 'smplx'], default='smplx', help='SMPL-based body type.')
+    parser.add_argument('--model_type', type=str, choices=['smpl', 'smplx', 'mano'], default='smplx', help='SMPL-based body type.')
     parser.add_argument('--gender', type=str, choices=['male', 'female', 'neutral'], default='neutral', help='SMPL gender.')
 
     # data samples
