@@ -75,42 +75,46 @@ def reorder(pose):
             res.append(0)
             res.append(0)
     return np.array([res])
-
 def main():
-    side = 'right'
-    with open("samples/selfpen_examples/mano/train.json", 'r') as f:
+    i = 0
+    side = 'left'
+    with open("samples/selfpen_examples/mano/all_train.json", 'r') as f:
         all = json.load(f)
     for x in all.values():
         for k,j in x.items():
             #print(k)
-            if k != "54650":
-                continue
             if j[side]:
-                j[side]['pose'] = np.array([j[side]['pose']], dtype=np.float32)
-                j[side]['shape'] = np.array([j[side]['shape']], dtype=np.float32)
-                j[side]['trans'] = np.array([j[side]['trans']], dtype=np.float32)
+                if i == 100:
+                    print(k)
+                    with open("./samples/selfpen_examples/mano/hand.pkl", 'wb') as f_p:
+                        pickle.dump(j, f_p)
+                    return
 
-                torch_param = {key: to_tensor(val, 'cuda') for key, val in j.items()}
-                #print(torch_param)
-                smpl_body_pose = torch.zeros((1, 48), dtype=torch.float, device='cuda')
-                smpl_body_pose[:, :48] = torch.from_numpy(reorder(torch_param['right' if torch_param['right'] else 'left']['pose'])).to('cuda')
-                torch_param['hand_pose'] = smpl_body_pose.to(torch.float32)
-                torch_param['betas'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['shape']).to(torch.float32).to('cuda')
-                torch_param['transl'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['trans']).to(torch.float32).to('cuda')
+                mano_pose = torch.FloatTensor(np.array([j[side]['pose']])).view(-1, 3).to('cuda')
+                root_pose = mano_pose[0].view(1, 3).to('cuda')
+                hand_pose = mano_pose[1:, :].view(1, -1).to('cuda')
+                shape = torch.FloatTensor(np.array([j[side]['shape']])).view(1, -1).to('cuda')
+                trans = torch.FloatTensor(np.array(j[side]['trans'])).view(1, 3).to('cuda')
 
-                data = torch_param
+                data = dict()
+                data['global_orient'] = root_pose
+                data['hand_pose'] = hand_pose
+                data['shape'] = shape
+                data['transl'] = trans
+
                 scene_mesh = trimesh.load_mesh('/home/rafael/PycharmProjects/DigitalHumans/volumetric-hand-model/COAP-hand/tutorials/samples/scene_collision/bunny.obj')
-                #print(data[key_pose])
-                model = smplx.create(model_path="/home/rafael/Downloads/Models", is_rhand=bool(data['right']), model_type='mano', gender='neutral',
-                                     num_pca_comps=1).to('cuda')
+                model = smplx.create(model_path="/home/rafael/Downloads/Models", is_rhand=side == 'right', model_type='mano',
+                                     use_pca=False).to('cuda')
                 model = attach_coap(model, pretrained=True, device='cuda')
 
                 # visualize
-                smpl_output = model(**data, return_verts=True, return_full_pose=True)
+                smpl_output = model(**data)
+                #smpl_output = model(global_orient=root_pose, hand_pose=hand_pose, betas=shape, transl=trans)
                 # NOTE: make sure that smpl_output contains the valid SMPL variables (pose parameters, joints, and vertices).
                 assert model.joint_mapper is None, 'COAP requires valid SMPL joints as input'
                 #print(data)
                 visualize(model, smpl_output, scene_mesh)
+                i += 1
 
 
 VISUALIZE = True
