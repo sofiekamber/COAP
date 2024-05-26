@@ -49,10 +49,14 @@ def visualize(model=None, smpl_output=None, scene_mesh=None, query_samples=None,
         VIEWER.scene.add(pyrender.Mesh.from_trimesh(posed_mesh))
 
     VIEWER.scene.add(pyrender.Mesh.from_trimesh(scene_mesh))
+    if args.model_type == 'mano':
+        point_radius = 0.0005
+    else:
+        point_radius = 0.005
     if query_samples is not None:
-        VIEWER.scene.add(vis_create_pc(query_samples, color=(0.0, 1.0, 0.0)))
+        VIEWER.scene.add(vis_create_pc(query_samples, color=(0.0, 1.0, 0.0), radius=point_radius))
     if collision_samples is not None:
-        VIEWER.scene.add(vis_create_pc(collision_samples, color=(1.0, 0.0, 0.0)))
+        VIEWER.scene.add(vis_create_pc(collision_samples, color=(1.0, 0.0, 0.0), radius=point_radius))
 
     VIEWER.render_lock.release()
 
@@ -107,11 +111,13 @@ def sample_scene_points(model, smpl_output, scene_vertices, scene_normals=None, 
     if not colliding_inds.any():
         return None
     points = points[colliding_inds.reshape(-1)]
-
     if scene_normals is not None and points.size(0) > 0:  # sample extra points if normals are available
         norms = scene_normals[inds][colliding_inds]
 
-        offsets = 0.5 * torch.normal(0.05, 0.05, size=(points.shape[0] * n_upsample, 1), device=norms.device).abs()
+        if args.model_type == 'mano':
+            offsets = 0.05 * torch.normal(0.05, 0.05, size=(points.shape[0] * n_upsample, 1), device=norms.device).abs()
+        else:
+            offsets = 0.5 * torch.normal(0.05, 0.05, size=(points.shape[0] * n_upsample, 1), device=norms.device).abs()
         verts, norms = points.repeat(n_upsample, 1), norms.repeat(n_upsample, 1)
         points = torch.cat((points, (verts - offsets * norms).reshape(-1, 3)), dim=0)
 
@@ -129,7 +135,7 @@ def main():
     # create a SMPL body and attach COAP
     if (args.model_type == 'mano'):
         key_pose = 'hand_pose'
-        model = smplx.create(model_path="/home/rafael/Downloads/Models", is_rhand=data['is_rhand'], model_type='mano',
+        model = smplx.create(model_path=args.bm_dir_path, is_rhand=data['is_rhand'], model_type='mano',
                              use_pca=False)
     else:
         key_pose = 'body_pose'
@@ -145,7 +151,6 @@ def main():
     smpl_output = model(**data, return_verts=True, return_full_pose=True)
     # NOTE: make sure that smpl_output contains the valid SMPL variables (pose parameters, joints, and vertices).
     assert model.joint_mapper is None, 'COAP requires valid SMPL joints as input'
-    # print(data)
     visualize(model, smpl_output, scene_mesh)
     print('waiting 5 seconds')
     time.sleep(5)
