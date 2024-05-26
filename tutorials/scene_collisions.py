@@ -80,14 +80,13 @@ def load_smpl_data(pkl_path):
         torch_param['body_pose'] = smpl_body_pose
 
     if args.model_type == 'mano':
-        smpl_body_pose = torch.zeros((1, 48), dtype=torch.float, device=args.device)
-        smpl_body_pose[:, :48] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['pose']).to(
-            args.device)
-        torch_param['hand_pose'] = smpl_body_pose.to(torch.float32)
-        torch_param['betas'] = torch.from_numpy(torch_param['right' if torch_param['right'] else 'left']['shape']).to(
-            torch.float32).to(args.device)
-        torch_param['transl'] = torch.from_numpy(np.array([[-5.0101800e-003, 1.5031957e-001, 3.0754370e-002]])).to(
-            torch.float32).to(args.device)
+        side = 'right' if torch_param['right'] else 'left'
+        torch_param['is_rhand'] = side == 'right'
+        mano_pose = torch.FloatTensor(np.array([torch_param[side]['pose']])).view(-1, 3).to(args.device)
+        torch_param['global_orient'] = mano_pose[0].view(1, 3).to(args.device)
+        torch_param['hand_pose'] = mano_pose[1:, :].view(1, -1).to(args.device)
+        torch_param['shape'] = torch.FloatTensor(np.array([torch_param[side]['shape']])).view(1, -1).to(args.device)
+        torch_param['transl'] = torch.FloatTensor(np.array(torch_param[side]['trans'])).view(1, 3).to(args.device)
 
     return torch_param
 
@@ -98,7 +97,6 @@ def sample_scene_points(model, smpl_output, scene_vertices, scene_normals=None, 
     # remove points that are well outside the SMPL bounding box
     bb_min = smpl_output.vertices.min(1).values.reshape(1, 3)
     bb_max = smpl_output.vertices.max(1).values.reshape(1, 3)
-
     inds = (scene_vertices >= bb_min).all(-1) & (scene_vertices <= bb_max).all(-1)
     if not inds.any():
         return None
@@ -131,13 +129,8 @@ def main():
     # create a SMPL body and attach COAP
     if (args.model_type == 'mano'):
         key_pose = 'hand_pose'
-        '''for i in range(len(data[key_pose][0])):
-            if i % 1 == 0:
-                data[key_pose][0][i] *= -1'''
-        print(data[key_pose])
-        model = smplx.create(model_path=args.bm_dir_path, is_rhand=bool(data['right']), model_type=args.model_type,
-                             gender=args.gender,
-                             num_pca_comps=1)
+        model = smplx.create(model_path="/home/rafael/Downloads/Models", is_rhand=data['is_rhand'], model_type='mano',
+                             use_pca=False)
     else:
         key_pose = 'body_pose'
         model = smplx.create(model_path=args.bm_dir_path, model_type=args.model_type, gender=args.gender,
@@ -159,7 +152,7 @@ def main():
 
     # create an optimizer
     init_pose = data[key_pose].detach().clone()
-    params_to_optimize = [key_pose]  # 'transl', 'global_orient'
+    params_to_optimize = args.params_to_optimize  # key_pose, 'transl', 'global_orient'
     for param in params_to_optimize:
         data[param].requires_grad = True
     opt = torch.optim.Adam([data[param] for param in params_to_optimize], lr=args.lr)
@@ -214,6 +207,7 @@ if __name__ == '__main__':
     # optimization related
     parser.add_argument('--max_iters', default=200, type=int, help='The maximum number of optimization steps.')
     parser.add_argument('--lr', default=0.005, type=float, help='Learning rate.')
+    parser.add_argument('--params_to_optimize', nargs='+', default=['body_pose'], type=str, help='List of parameters to optimize.')
 
     args = parser.parse_args()
     VISUALIZE = True
