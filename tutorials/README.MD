@@ -14,7 +14,7 @@ Mano:
 ```bash
 python scene_collisions.py --sample_body ${PARAMETERS} --bm_dir_path ${MODELS} --params_to_optimize 'hand_pose' --lr 0.005 --model_type mano --scan_path ${OBJECT}
 ```
-where `${Parameter}` is a .pkl file and `${OBJECT}` is the according .obj file. Both can be found at https://drive.google.com/drive/folders/1y1C-j9V8RQ8v-ofvZem5DMvRJb2o0ZuQ?usp=sharing \
+where `${PARAMETERS}` is a .pkl file and `${OBJECT}` is the according .obj file. Both can be found at https://drive.google.com/drive/folders/1y1C-j9V8RQ8v-ofvZem5DMvRJb2o0ZuQ?usp=sharing \
 \
 where `${MODELS}` is a directory path with the SMPL bodies of the following structure (for more details see https://github.com/vchoutas/smplx#model-loading):
 ```bash
