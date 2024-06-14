@@ -15,7 +15,37 @@ from skimage.io import imsave
 from coap import attach_coap
 
 from data import SMPLDataset
+from halo.halo.models.halo_adapter.adapter import HaloAdapter
+from halo.halo.models.halo_adapter.converter import transform_to_canonical
+from  halo.halo.models.halo_adapter.converter import PoseConverter
+from halo.halo.models.halo_adapter.interface import convert_joints, change_axes
 from renderer import Renderer
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+def visualize_point_cloud(red=None, blue=None, green=None, mesh=None):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    if red is not None:
+        ax.scatter(red[:, 0], red[:, 1], red[:, 2], c='r')
+        for i in range(len(red)):  # plot each point + it's index as text above
+            ax.text(red[i, 0], red[i, 1], red[i, 2], '%s' % (str(i)), size=20, zorder=1,
+                    color='k')
+    if blue is not None:
+        ax.scatter(blue[:, 0], blue[:, 1], blue[:, 2], c='b')
+        for i in range(len(blue)):  # plot each point + it's index as text above
+            ax.text(blue[i, 0], blue[i, 1], blue[i, 2], '%s' % (str(i)), size=20, zorder=1,
+                    color='k')
+    if green is not None:
+        ax.scatter(green[:, 0], green[:, 1], green[:, 2], c='g')
+    if mesh is not None:
+        ax.plot_trisurf(mesh.vertices[:, 0], mesh.vertices[:, 1], mesh.vertices[:, 2], triangles=mesh.faces)
+
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    plt.show(block=True)
 
 
 class COAPModule(pl.LightningModule):
@@ -83,6 +113,9 @@ class COAPModule(pl.LightningModule):
 
         if self.args.eval_export_visuals:
             self.export_visuals(batch, batch['seq_names'], batch['frame_ids'])
+
+        if self.args.eval_export_halo:
+            self.export_halo(batch, batch['seq_names'], batch['frame_ids'])
         return val_metric
 
     def compute_val_loss(self, batch):
@@ -94,11 +127,21 @@ class COAPModule(pl.LightningModule):
         pred_occ = []
         for pts in torch.split(points, self.max_queries//batch_size, dim=1):
             pred_occ.append(self(batch, pts))
+
+        pred_occ_halo = []
+        for pts in torch.split(points, self.max_queries//batch_size, dim=1):
+            pred_occ_halo.append(self.query_halo(batch, pts, is_right=self.smpl_cfg['is_rhand']))
+
         pred_occ = torch.cat(pred_occ, dim=1)
         iou_unif = self.smpl_body.coap.compute_iou(pred_occ[:, :n_pts//2], gt_occ[:, :n_pts//2])
         iou_surf = self.smpl_body.coap.compute_iou(pred_occ[:, n_pts//2:], gt_occ[:, n_pts//2:])
         iou_mean = (iou_unif + iou_surf)*0.5
-        return dict(iou_unif=iou_unif, iou_surf=iou_surf, iou_mean=iou_mean)
+
+        pred_occ_halo = torch.cat(pred_occ_halo, dim=1)
+        iou_unif_halo = self.smpl_body.coap.compute_iou(pred_occ_halo[:, :n_pts//2], gt_occ[:, :n_pts//2])
+        iou_surf_halo = self.smpl_body.coap.compute_iou(pred_occ_halo[:, n_pts//2:], gt_occ[:, n_pts//2:])
+        iou_mean_halo = (iou_unif_halo + iou_surf_halo)*0.5
+        return dict(iou_unif=iou_unif, iou_surf=iou_surf, iou_mean=iou_mean, iou_unif_halo=iou_unif_halo, iou_surf_halo=iou_surf_halo, iou_mean_halo=iou_mean_halo)
 
     def test_epoch_end(self, outputs):
         """ Aggregate test predictions.
@@ -122,6 +165,31 @@ class COAPModule(pl.LightningModule):
                 yaml.dump(val_metric, f)
 
             print('\n\nTest results are saved in:', dst_path, end='\n\n')
+
+    def export_halo(self, batch, seq_names:list, frame_ids:list):
+        smpl_output = self.smpl_body(**batch, return_verts=True, return_full_pose=True)
+
+        coap_meshes = self.smpl_body.coap.extract_mesh(smpl_output, max_queries=self.max_queries, use_mise=True)
+        #
+        coap_meshes = [coap_meshes[0]]  # only first batch
+        batch_size = smpl_output.vertices.shape[0]
+
+        meshes = self.visualize_halo(batch, smpl_output, smpl_cfg['is_rhand'])
+
+        for b_ind, mesh in enumerate(zip(meshes)):
+            seq_name = seq_names[b_ind]
+            frame_id = frame_ids[b_ind]
+
+            dst_mesh_dir = os.path.join(self.logger.save_dir, 'halo_meshes', f'epoch={self.current_epoch:05d}_step={self.global_step:05d}', seq_name)
+            pathlib.Path(dst_mesh_dir).mkdir(parents=True, exist_ok=True)
+
+            # TODO remove 0
+            mesh[0].export(os.path.join(dst_mesh_dir, f'{frame_id}.ply'))
+
+            coap_meshes[b_ind].export(os.path.join(dst_mesh_dir, f'{frame_id}_COAP_MESH.ply'))
+
+            smpl_output_mesh = trimesh.Trimesh(smpl_output.vertices[b_ind].detach().cpu().numpy(), self.smpl_body.faces)
+            smpl_output_mesh.export(os.path.join(dst_mesh_dir, f'{frame_id}_MANO_MESH.ply'))
 
     def export_visuals(self, batch, seq_names:list, frame_ids:list):
         smpl_output = self.smpl_body(**batch, return_verts=True, return_full_pose=True)
@@ -183,6 +251,49 @@ class COAPModule(pl.LightningModule):
             )[0].squeeze(0) * 255.).cpu().numpy().astype(np.uint8))
         return meshes, rnd_images, rnd_smpl_images
 
+    def query_halo(self, batch, points, is_right=True):
+        smpl_output = self.smpl_body(**batch, return_verts=True, return_full_pose=True)
+        halo_config_file = 'configs/halo/halo_config.yaml'
+        halo_adapter = HaloAdapter(halo_config_file, device='cuda:0', denoiser_pth=None)
+        target_js = convert_joints(smpl_output.joints, source='halo', target='mano')
+
+        # flip points and joints for left hand
+        if not is_right:
+            flip_tensor = torch.tensor([-1, 1, 1], device='cuda:0')
+
+            target_js -= target_js[:, 0:1, :]
+            target_js[:, :, 0] *= flip_tensor[0]
+
+            points -= target_js[:, 0:1, :]
+            points[:, :, 0] *= flip_tensor[0]
+
+            print("target_js", target_js.shape)
+            print("points", points.shape)
+
+        occ = halo_adapter.query_points(points * 100, target_js.cuda() * 100, joint_order="mano")
+        return occ
+
+    @torch.no_grad()
+    def visualize_halo(self, batch, smpl_output, is_right=True):
+        device = smpl_output.vertices.device
+        halo_config_file = 'configs/halo/halo_config.yaml'
+        halo_adapter = HaloAdapter(halo_config_file, device='cuda:0', denoiser_pth=None)
+        output_joints = smpl_output.joints
+
+        if not is_right:
+            flip_tensor = torch.tensor([-1, 1, 1], device='cuda:0')
+            output_joints[:, :, :] *= flip_tensor
+
+        first_batch = output_joints[0].unsqueeze(0)
+
+        target_js = convert_joints(first_batch, source='halo', target='mano')
+
+        halo_mesh, halo_kpts = halo_adapter(target_js.cuda() * 100, original_position=True, joint_order="mano", return_kps=True)
+        halo_mesh.vertices = halo_mesh.vertices / 100
+
+        # TODO not only first batch (remove list
+        return [halo_mesh]
+
 
 if __name__ == "__main__":
     # add input arguments
@@ -195,6 +306,7 @@ if __name__ == "__main__":
     parser.add_argument('--ckpt_path', type=str, default=None, help='Path/URL of the checkpoint from which training is resumed.')
     parser.add_argument('--run_eval', action='store_true', help='Whether to run evaluation instead of training.')
     parser.add_argument('--eval_export_visuals', action='store_true', help='Whether to export meshes and render images in the evaluation mode')
+    parser.add_argument('--eval_export_halo', action='store_true', help='Whether to export HALO meshes in the evaluation mode')
     pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
 
